@@ -1,125 +1,184 @@
-from pymantic import sparql
+from blazegraph_python_master.pymantic import sparql
 import time
 import psutil
 import threading
 import statistics
 import matplotlib.pyplot as plt
+import random
+from deliter import Deliter
 
-server = sparql.SPARQLServer('http://127.0.0.1:9999/blazegraph/sparql')
+server = sparql.SPARQLServer('http://172.18.6.27:9999/blazegraph/sparql')
 
-arrayDelete = [['delete where {<http://127.0.0.1/Core_1_Level_2_1/> <http://127.0.0.1/bg/ont/test1#has_id> ?o}',
-         'delete where {<http://127.0.0.1/Core_1_Level_2_1000/> <http://127.0.0.1/bg/ont/test1#has_id> ?o}',
-         'delete where {<http://127.0.0.1/Core_1_Level_2_1001/> <http://127.0.0.1/bg/ont/test1#has_id> ?o}',
-         'delete where {<http://127.0.0.1/Core_1_Level_2_1002/> <http://127.0.0.1/bg/ont/test1#has_parent_id> ?o}',
-         'delete where {<http://127.0.0.1/Core_1_Level_2_1003/> <http://127.0.0.1/bg/ont/test1#has_id> ?o}',
-         'delete where {<http://127.0.0.1/Core_1_Level_2_1004/> <http://127.0.0.1/bg/ont/test1#has_id> ?o}',
-         'delete where {<http://127.0.0.1/Core_1_Level_2_1005/> <http://127.0.0.1/bg/ont/test1#linked_to> ?o}',
-         'delete where {<http://127.0.0.1/Core_1_Level_2_1006/> <http://127.0.0.1/bg/ont/test1#has_id> ?o}',
-         'delete where {<http://127.0.0.1/Core_1_Level_2_50114/> <http://127.0.0.1/bg/ont/test1#has_parent_id> ?o}',
-         'delete where {<http://127.0.0.1/Core_1_Level_2_12128/> <http://127.0.0.1/bg/ont/test1#linked_to> ?o}'
-         ]]
-
-
-
-arrayInsert = [["insert data {<http://127.0.0.1/Core_1_Level_2_1/> <http://127.0.0.1/bg/ont/test1#has_id> 'Core_1_Level_2_1'}",
-          "insert data {<http://127.0.0.1/Core_1_Level_2_1000/> <http://127.0.0.1/bg/ont/test1#has_id> 'Core_1_Level_2_1000'}",
-          "insert data {<http://127.0.0.1/Core_1_Level_2_1001/> <http://127.0.0.1/bg/ont/test1#has_id> 'Core_1_Level_2_1001'}",
-          "insert data {<http://127.0.0.1/Core_1_Level_2_1002/> <http://127.0.0.1/bg/ont/test1#has_parent_id> <http://127.0.0.1/Core_1/>}",
-          "insert data {<http://127.0.0.1/Core_1_Level_2_1003/> <http://127.0.0.1/bg/ont/test1#has_id> 'Core_1_Level_2_1003'}",
-          "insert data {<http://127.0.0.1/Core_1_Level_2_1004/> <http://127.0.0.1/bg/ont/test1#has_id> 'Core_1_Level_2_1004'}",
-          "insert data {<http://127.0.0.1/Core_1_Level_2_1005/> <http://127.0.0.1/bg/ont/test1#linked_to> <http://127.0.0.1/Core_2_Level_2_1005/>}",
-          "insert data {<http://127.0.0.1/Core_1_Level_2_1006/> <http://127.0.0.1/bg/ont/test1#has_id> 'Core_1_Level_2_1006'}",
-          "insert data {<http://127.0.0.1/Core_1_Level_2_50114/> <http://127.0.0.1/bg/ont/test1#has_parent_id> <http://127.0.0.1/Core_1/>}",
-          "insert data {<http://127.0.0.1/Core_1_Level_2_12128/> <http://127.0.0.1/bg/ont/test1#linked_to> <http://127.0.0.1/Core_2_Level_2_12128/>}"
-          ]]
-
-arraySelect = [['select * where {?s ?p ?o} limit 50000','select * where {?s ?p ?o} limit 50000']]
-
-flagDeleteThread = 0
-numderDeleteArray = 0
-flagSelectThread = 1
-numderSelectArray = 0
-flagCPUThread = 1
+arrayDelete = []
+arraySelect = []
 arrayThreads = []
+executionTimeSelect = []
+executionTimeDelete = []
+cpuThread = 0
 
-def deleteRequest():
-    number = numderDeleteArray
-    executionTime = []
-    for i in range(len(arrayDelete[number])):
-        print("Delete request №" + str(i))
-        start = time.time()
-        #Удаление записи
-        server.update(arrayDelete[number][i])
-        end = time.time()
-        executionTime.append(end - start)
-    print("execution time of deletion requests: " + str(executionTime))
-    print("average execution time: " + str(statistics.mean(executionTime)))
+settings = [[1,0,0,200,50,0,0]]
+
+flagSelectThread = 1
+flagDeleteThread = 0
+flagCPUThread = 1
+countSelectRequests = 100
+countSelectThreads = 10
+countDeleteRequests = 0
+countDeleteThreads = 0
+
+
+class Counter():
+    def __init__(self):
+        self.num = 0
+    
+    def get(self) -> int:
+        self.num += 1
+        print(self.num)
+        return self.num - 1
+    
+    def current(self):
+        return self.num
+
+counterSelect = Counter()
+counterDelete = Counter()
+
+def createArraySelect(requests_size):
+    for i in range(requests_size):
+        arraySelect.append('select * where {?s ?p ?o} limit 100000')
+
+def createArrayDelete(requests_size, sample_size):
+    result = server.query('select * where { ?s ?p ?o } limit ' + str(sample_size))
+    if requests_size > len(result['results']['bindings']):
+        requests_size = len(result['results']['bindings'])
+    request_result = random.sample(result['results']['bindings'], requests_size)
+    for i in request_result:
+        s = i['s']['value']
+        if 'http' in s:
+            s = "<" + s + ">"
+        p = i['p']['value']
+        if 'http' in p:
+            p = "<" + p + ">"
+        o = i['o']['value']
+        if 'http' in o:
+            o = "<" + o + ">"
+        else:
+            o = "'" + o + "'"
+        arrayDelete.append('delete where {' + s + ' ' + p + ' ' + o + '}')
 
 def selextRequest():
-    number = numderDeleteArray
-    executionTime = []
-    for i in range(len(arraySelect[number])):
-        print("Select request №" + str(i))
+    '''
+    while(flagSelectThread == 1):
         start = time.time()
-        #Удаление записи
-        server.query(arraySelect[number][i])
+        print('s')
+        server.query('select * where {?s ?p ?o} limit 100000')
         end = time.time()
-        executionTime.append(end - start)
-    print("execution time of deletion requests: " + str(executionTime))
-    print("average execution time: " + str(statistics.mean(executionTime)))
+        executionTimeSelect.append(end - start)
+    '''
+    while counterSelect.current() < len(arraySelect):
+        start = time.time()
+        print('s')
+        server.query(arraySelect[counterSelect.get()])
+        end = time.time()
+        executionTimeSelect.append(end - start)
+    
+
+def deleteRequest():
+    while counterDelete.current() < len(arrayDelete):
+        start = time.time()
+        print('d-------------------')
+        server.update(arrayDelete[counterDelete.get()])
+        end = time.time()
+        executionTimeDelete.append(end - start)
 
 def controlCPU():
     cpuArray = []
+    ramArray = []
     timer = time.time()
     delta = 1
     while(flagCPUThread == 1):   
         if(time.time() > timer + delta):
-            cpuArray.append(psutil.cpu_percent(interval=1, percpu=False))
+            cpuArray.append(psutil.cpu_percent())
+            ramArray.append(psutil.virtual_memory().percent)
             timer = time.time()
     print("cpu load: " + str(cpuArray))
+    print("ram load: " + str(ramArray))
     if(len(cpuArray) > 0):
         print("average cpu load: " + str(statistics.mean(cpuArray)))    #Выводит среднее время ответа
+        plt.title('CPU')
+        plt.plot(cpuArray,"r")
+        plt.plot([0,len(cpuArray)],[statistics.mean(cpuArray),statistics.mean(cpuArray)],'b')
+        plt.show()
+    if(len(ramArray) > 0):
+        print("average ram load: " + str(statistics.mean(ramArray)))    #Выводит среднее время ответа
+        plt.title('RAM')
+        plt.plot(ramArray,"r")
+        plt.plot([0,len(ramArray)],[statistics.mean(ramArray),statistics.mean(ramArray)],'b')
+        plt.show()
+
+
+for i in settings:
+    print(i)
+    counterSelect = Counter()
+    counterDelete = Counter()
+    arrayDelete = []
+    arraySelect = []
+    arrayThreads = []
+    executionTimeSelect = []
+    executionTimeDelete = []
+    cpuThread = 0
+    flagSelectThread = i[0]
+    flagDeleteThread = i[1]
+    flagCPUThread = i[2]
+    countSelectRequests = i[3]
+    countSelectThreads = i[4]
+    countDeleteRequests = i[5]
+    countDeleteThreads = i[6]   
+
+    if(flagCPUThread == 1):
+        cpuThread = threading.Thread(target=controlCPU)
+        cpuThread.start()
+        
+    createArraySelect(countSelectRequests)
+    createArrayDelete(countDeleteRequests,2000)
     
+    if(flagSelectThread == 1):
+#        createArraySelect(countSelectRequests)
+        numberThread = len(arrayThreads)
+        for i in range(countSelectThreads):
+            arrayThreads.append(threading.Thread(target=selextRequest))
+        for i in range(countSelectThreads):
+            arrayThreads[numberThread + i].start()
+
+    if(flagDeleteThread == 1):
+#        createArrayDelete(countDeleteRequests,2000)
+        numberThread = len(arrayThreads)
+        for i in range(countDeleteThreads):
+            arrayThreads.append(threading.Thread(target=deleteRequest))
+        for i in range(countDeleteThreads):
+            arrayThreads[numberThread + i].start()
     
-
-if(flagCPUThread == 1):
-    thread = threading.Thread(target=controlCPU)
-    thread.start()
-
-#Запустит первый список selrct запросов из arraySelect на одном потоке
-if(flagSelectThread == 1):
-    numderSelectArray = 0
-    numberThread = len(arrayThreads)
-    arrayThreads.append(threading.Thread(target=selextRequest))
-    arrayThreads[numberThread].start()
-
-#Запустит все списки selrct запросов из arraySelect на разных потоках
-if(flagSelectThread == 2):
-    numberThread = len(arrayThreads)
-    for i in range(len(arrayDelete)):
-        arrayThreads.append(threading.Thread(target=selextRequest))
-    for i in range(len(arrayDelete)):
-        numderSelectArray = i
-        arrayThreads[numberThread + i].start()
-
-#Запустит первый список запросов удаления из arrayDelete на одном потоке
-if(flagDeleteThread == 1):
-    numderDeleteArray = 0
-    numberThread = len(arrayThreads)
-    arrayThreads.append(threading.Thread(target=deleteRequest))
-    arrayThreads[numberThread].start()
-
-#Запустит все списки запросов удаления из arrayDelete на разных потоках
-if(flagDeleteThread == 2):
-    numberThread = len(arrayThreads)
-    for i in range(len(arrayDelete)):
-        arrayThreads.append(threading.Thread(target=deleteRequest))
-    for i in range(len(arrayDelete)):
-        numderDeleteArray = i
-        arrayThreads[numberThread + i].start()
-
- 
-if(flagCPUThread == 1):
-    for thread in arrayThreads:
-        thread.join()
-    flagCPUThread = 0
+    if(flagCPUThread == 1):
+        while counterDelete.current() < len(arrayDelete):
+            time.sleep(1)
+        flagSelectThread = 0
+        for thread in arrayThreads:
+            thread.join()
+        flagCPUThread = 0
+        cpuThread.join()
+        if(len(executionTimeSelect) > 0):
+            print("execution time of selection requests: " + str(executionTimeSelect))
+            print("average execution time: " + str(statistics.mean(executionTimeSelect)))
+            plt.title('Select ' + str(countSelectRequests) + ' requests, ' + str(countSelectThreads) + ' threads')
+            plt.plot(executionTimeSelect,"r")
+            plt.plot([0,len(executionTimeSelect)],[statistics.mean(executionTimeSelect),statistics.mean(executionTimeSelect)],'b')
+            plt.show()
+        if(len(executionTimeDelete) > 0):
+            print("execution time of selection requests: " + str(executionTimeDelete))
+            print("average execution time: " + str(statistics.mean(executionTimeDelete)))
+            plt.title('Delete ' + str(countDeleteRequests) + ' requests, ' + str(countDeleteThreads) + ' threads')
+            plt.plot(executionTimeDelete,"r")
+            plt.plot([0,len(executionTimeDelete)],[statistics.mean(executionTimeDelete),statistics.mean(executionTimeDelete)],'b')
+            plt.show()
+            
+for thread in arrayThreads:
+    thread.join()
